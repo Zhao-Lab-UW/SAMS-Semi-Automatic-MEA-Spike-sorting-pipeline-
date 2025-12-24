@@ -1,0 +1,32 @@
+# Data files (large spike data)
+*.spk
+spk/
+
+# MATLAB temporary files
+*.asv
+*.m~
+*.autosave
+
+# MATLAB generated files
+*.mex*
+*.mlappinstall
+slprj/
+sccprj/
+
+# Simulink
+*.slxc
+
+# Packaged app installers (keep the compiled exe, but not web installers)
+SemiAutomaticMEASpikeSorting/for_redistribution/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code config (local settings)
+.claude/
