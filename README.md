@@ -52,7 +52,6 @@ SAMS/
 ├── manualspikesorting/              # Manual curation standalone app
 │   └── for_redistribution_files_only/
 ├── src/                             # Shared source code
-│   ├── run_SAMS.m                   # Main entry point
 │   ├── automatic_sorting.mlapp     # Automatic sorting GUI
 │   ├── manual_sorting_03252025.mlapp  # Manual sorting GUI
 │   ├── AxionFileLoader/            # Axion file reading library
