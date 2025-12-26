@@ -19,8 +19,6 @@ A MATLAB-based pipeline for semi-automatic spike sorting and network burst analy
 
 ## Installation
 
-### Option 1: Standalone Application (Recommended for end users)
-
 **Automatic Sorting:**
 1. Download from `SemiAutomaticMEASpikeSorting/for_redistribution_files_only/`
 2. Run `SemiAutomaticMEASpikeSorting.exe`
@@ -30,25 +28,6 @@ A MATLAB-based pipeline for semi-automatic spike sorting and network burst analy
 1. Download from `manualspikesorting/for_redistribution_files_only/`
 2. Run `manualspikesorting.exe`
 3. Load the output files from automatic sorting to review and curate results
-
-### Option 2: Running from Source
-
-1. Clone this repository:
-   ```
-   git clone https://github.com/xiaoxuanren/SAMS.git
-   ```
-2. Add the `src/` folder and subfolders to your MATLAB path:
-   ```matlab
-   addpath(genpath('path/to/SAMS/src'));
-   ```
-3. Run the main application:
-   ```matlab
-   run_SAMS
-   ```
-   Or launch the GUI:
-   ```matlab
-   automatic_sorting
-   ```
 
 ## Usage
 
