@@ -22,11 +22,11 @@ A MATLAB-based pipeline for semi-automatic spike sorting and network burst analy
 
 **Automatic Sorting:**
 1. Download and install [MATLAB Runtime R2023a](https://www.mathworks.com/products/compiler/mcr/index.html) if not already installed
-2. Download from `SemiAutomaticMEASpikeSorting/for_redistribution_files_only/`
+2. Download the **entire** `SemiAutomaticMEASpikeSorting/for_redistribution_files_only/` folder (all files are required, including `SAMS1.pptx` for output slides and `splash.png`)
 3. Run `SemiAutomaticMEASpikeSorting.exe`
 
 **Manual Curation (requires output from Automatic Sorting):**
-1. Download from `manualspikesorting/for_redistribution_files_only/`
+1. Download the **entire** `manualspikesorting/for_redistribution_files_only/` folder (all files are required)
 2. Run `manualspikesorting.exe`
 3. Load the output files from automatic sorting to review and curate results
 
