@@ -1,13 +1,18 @@
-function [networkBurstInfo] = get_network_spike_participation(samplingRate, spikeMatrix, electrodeIndices, networkThreshold, maxNetworkISI, minNetworkSpikes)
-% GET_NETWORK_SPIKE_PARTICIPATION_FIXED - Detect network bursts with correct burst boundary detection
+function [networkBurstInfo, isBurstingElectrode] = get_network_spike_participation(samplingRate, spikeSamples, electrodeIndices, networkThreshold, maxNetworkISI, minNetworkSpikes)
+% GET_NETWORK_SPIKE_PARTICIPATION - Detect network bursts with correct burst boundary detection
 %
 % This function identifies synchronized bursting across multiple electrodes
 % based on network participation threshold and burst criteria.
 %
+% Spikes are passed as sample indices per electrode instead of an electrodes x samples
+% matrix, so memory scales with the number of spikes, not the recording length.
+%
 % INPUTS:
 %   samplingRate - Recording sampling rate in Hz
-%   spikeMatrix - Binary spike matrix (electrodes × timepoints)
-%   electrodeIndices - Indices of electrodes in recording
+%   spikeSamples - Cell array, one entry per electrode: sorted unique sample indices of
+%                  its spikes (may be empty)
+%   electrodeIndices - Indices of electrodes in recording, one unique index per
+%                      spikeSamples entry
 %   networkThreshold - Minimum fraction of electrodes that must participate
 %   maxNetworkISI - Maximum inter-spike interval for network burst (ms)
 %   minNetworkSpikes - Minimum spikes required for a network burst
@@ -20,112 +25,88 @@ function [networkBurstInfo] = get_network_spike_participation(samplingRate, spik
 %       Row 4: Mean ISI within each burst (seconds)
 %       Row 5: Number of spikes per network burst
 %       Row 6: Number of firing cells in each burst
+%   isBurstingElectrode - Logical column, one entry per electrode: true if the electrode
+%       fires in at least one network burst
 
     % Convert maxNetworkISI from ms to timepoints
     maxNetworkISI_timepoints = maxNetworkISI * samplingRate / 1000;
-% Ensure electrodeIndices is a row vector
+    % Ensure electrodeIndices is a column vector
     electrodeIndices = electrodeIndices(:);
-    % Find timepoints with any firing
-    totalFiringByTimepoint = sum(spikeMatrix);
-    firingTimepoints = find(totalFiringByTimepoint > 0);
+    numElectrodes = numel(spikeSamples);
+    isBurstingElectrode = false(numElectrodes, 1);
 
-    % Find explicit burst groups based on gap size
-    burstGroups = {};
-
-    if ~isempty(firingTimepoints)
-        currentGroup = 1;  % Start with first timepoint index
-
-        for idx = 2:length(firingTimepoints)
-            gap = firingTimepoints(idx) - firingTimepoints(idx-1);
-
-            if gap < maxNetworkISI_timepoints
-                % Small gap - add to current burst group
-                currentGroup = [currentGroup, idx];
-            else
-                % Large gap - save current burst and start new one
-                if length(currentGroup) >= 2  % At least 2 spikes for a burst
-                    burstGroups{end+1} = currentGroup;
-                end
-                currentGroup = idx;  % Start new potential burst
-            end
-        end
-
-        % Add the last group
-        if length(currentGroup) >= 2
-            burstGroups{end+1} = currentGroup;
-        elseif length(currentGroup) == 1 && length(firingTimepoints) == 1
-            % Special case: only one spike total - not a burst
-            burstGroups = {};
-        end
+    % List every spike with its electrode, then find timepoints with any firing
+    spikeCounts = cellfun(@numel, spikeSamples(:));
+    allSpikeSamples = zeros(sum(spikeCounts), 1);
+    spikeElectrode = reshape(repelem((1:numElectrodes)', spikeCounts), [], 1);
+    spikeOffset = 0;
+    for electrodeNum = 1:numElectrodes
+        allSpikeSamples(spikeOffset + (1:spikeCounts(electrodeNum))) = spikeSamples{electrodeNum};
+        spikeOffset = spikeOffset + spikeCounts(electrodeNum);
     end
+    [firingTimepoints, ~, spikeTimepoint] = unique(allSpikeSamples);
 
-    % ===== PROCESS EACH BURST GROUP =====
-    % Initialize network burst statistics
-    burstCount = 0;
-    burstStartTimepoints = [];
-    electrodesPerBurst = [];
-    burstDurations = [];
-    meanISIWithinBurst = [];
-    spikesPerBurst = [];
-    cellsPerBurst = [];
-    % Process each identified burst group
-    for groupIdx = 1:length(burstGroups)
-        burstIndices = burstGroups{groupIdx};
-        burstTimepoints = firingTimepoints(burstIndices);
-
-        % Collect all participating electrodes and cells in this burst
-        firingElectrodeIndices = [];
-        firingCellIndices = [];
-
-        for idx = burstIndices
-            currentTimepoint = firingTimepoints(idx);
-            currentFiringCells = find(spikeMatrix(:, currentTimepoint) == 1);
-
-            if ~isempty(currentFiringCells)
-                firingElectrodeIndices = [firingElectrodeIndices; electrodeIndices(currentFiringCells)];
-                firingCellIndices = [firingCellIndices; currentFiringCells];
-            end
-        end
-
-        % Get unique electrode and cell indices
-        uniqueElectrodeIndices = unique(firingElectrodeIndices);
-        uniqueCellIndices = unique(firingCellIndices);
-
-        % Calculate total spikes in this burst
-        totalSpikes = sum(spikeMatrix(:, burstTimepoints), 'all');
-
-        % Check if this qualifies as a network burst
-        totalElectrodes = length(unique(electrodeIndices));
-
-        if (length(uniqueElectrodeIndices) > networkThreshold * totalElectrodes) && ...
-           (totalSpikes >= minNetworkSpikes)
-
-            % Valid network burst detected
-            burstCount = burstCount + 1;
-
-            % Store burst information
-            burstStartTimepoints(burstCount) = burstTimepoints(1);
-            electrodesPerBurst(burstCount) = length(uniqueElectrodeIndices);
-
-            % Duration in timepoints (will convert to seconds later)
-            if length(burstTimepoints) > 1
-                burstDurations(burstCount) = burstTimepoints(end) - burstTimepoints(1);
-            else
-                burstDurations(burstCount) = 0;
-            end
-
-            % Calculate mean ISI within burst
-            if length(burstTimepoints) > 1
-                meanISIWithinBurst(burstCount) = mean(diff(burstTimepoints));
-            else
-                meanISIWithinBurst(burstCount) = 0;
-            end
-
-            % Store spike and cell counts
-            spikesPerBurst(burstCount) = totalSpikes;
-            cellsPerBurst(burstCount) = length(uniqueCellIndices);
-        end
+    % Find explicit burst groups based on gap size: runs of firing timepoints whose
+    % gaps are all shorter than the max ISI, keeping runs of at least 2 timepoints
+    if isempty(firingTimepoints)
+        groupStarts = zeros(0, 1);
+        groupEnds = zeros(0, 1);
+    else
+        isGap = ~(diff(firingTimepoints) < maxNetworkISI_timepoints);
+        groupStarts = [1; find(isGap) + 1];
+        groupEnds = [find(isGap); numel(firingTimepoints)];
+        isBurstGroup = groupEnds - groupStarts >= 1;
+        groupStarts = groupStarts(isBurstGroup);
+        groupEnds = groupEnds(isBurstGroup);
     end
+    numGroups = numel(groupStarts);
+
+    % Assign every spike to its burst group (0 = outside any group)
+    timepointGroup = zeros(numel(firingTimepoints), 1);
+    for groupIdx = 1:numGroups
+        timepointGroup(groupStarts(groupIdx):groupEnds(groupIdx)) = groupIdx;
+    end
+    spikeGroup = timepointGroup(spikeTimepoint);
+    inGroup = spikeGroup > 0;
+    % Keep these as columns: with a single spike, indexing would give 0x0
+    groupOfSpike = reshape(spikeGroup(inGroup), [], 1);
+    electrodeOfSpike = reshape(spikeElectrode(inGroup), [], 1);
+
+    % Spikes and participating electrodes per group. Each raster row is one electrode,
+    % so the number of firing cells equals the number of participating electrodes
+    spikesPerGroup = accumarray(groupOfSpike, 1, [numGroups, 1]);
+    groupElectrodePairs = unique([groupOfSpike, electrodeOfSpike], 'rows');
+    electrodesPerGroup = accumarray(groupElectrodePairs(:, 1), 1, [numGroups, 1]);
+
+    % Check which groups qualify as network bursts
+    totalElectrodes = length(unique(electrodeIndices));
+    isNetworkBurst = (electrodesPerGroup > networkThreshold * totalElectrodes) & ...
+        (spikesPerGroup >= minNetworkSpikes);
+    burstGroupIndices = find(isNetworkBurst)';
+    burstCount = numel(burstGroupIndices);
+
+    % ===== PROCESS EACH NETWORK BURST =====
+    burstStartTimepoints = zeros(1, burstCount);
+    burstDurations = zeros(1, burstCount);
+    meanISIWithinBurst = zeros(1, burstCount);
+    for burstIdx = 1:burstCount
+        groupIdx = burstGroupIndices(burstIdx);
+        burstTimepoints = firingTimepoints(groupStarts(groupIdx):groupEnds(groupIdx));
+
+        % Duration in timepoints (will convert to seconds later)
+        burstStartTimepoints(burstIdx) = burstTimepoints(1);
+        burstDurations(burstIdx) = burstTimepoints(end) - burstTimepoints(1);
+
+        % Calculate mean ISI within burst
+        meanISIWithinBurst(burstIdx) = mean(diff(burstTimepoints));
+    end
+    electrodesPerBurst = electrodesPerGroup(burstGroupIndices)';
+    spikesPerBurst = spikesPerGroup(burstGroupIndices)';
+    cellsPerBurst = electrodesPerBurst;
+
+    % Electrodes that fire in at least one network burst
+    isBurstPair = isNetworkBurst(groupElectrodePairs(:, 1));
+    isBurstingElectrode(groupElectrodePairs(isBurstPair, 2)) = true;
 
     % Convert durations and ISIs from timepoints to seconds
     if burstCount > 0
