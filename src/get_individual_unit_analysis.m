@@ -161,7 +161,16 @@ function [T_unit, T_electrode] = get_individual_unit_analysis(sorting_results, a
 
                         % Get spike times for this unit
                         unit_times_raw = Times(1,unit_spike_indices);
-                        
+
+                        % Remove invalid time points (<=0), as process_final_clusters.m does. Only a manual
+                        % edit that adds unsorted waveforms to a unit can bring them here
+                        valid_idx = unit_times_raw > 0;
+                        unit_spike_indices = unit_spike_indices(valid_idx);
+                        unit_times_raw = unit_times_raw(valid_idx);
+                        if isempty(unit_spike_indices)
+                            continue;
+                        end
+
                         % Remove spikes violating refractory period (matching process_final_clusters2.m)
                         removed_short_isis = 0;
                         if length(unit_spike_indices) > 1

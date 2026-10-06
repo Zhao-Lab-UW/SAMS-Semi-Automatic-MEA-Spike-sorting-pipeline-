@@ -1,6 +1,6 @@
-function get_network_burst_info(raster_raw, maxTime, samplingRate, networkParticipationThreshold, ...
+function get_network_burst_info_legacy(raster_raw, maxTime, samplingRate, networkParticipationThreshold, ...
     minSpikesElectrode, maxISIElectrode, minSpikesNetwork, maxISINetwork, outputFolder, sorting_results)
-% GET_NETWORK_BURST_INFO - Analyze network bursting activity across electrodes
+% GET_NETWORK_BURST_INFO_LEGACY - Frozen copy of get_network_burst_info at d4456d3 (pre-fix), for tests
 %
 % This function detects and analyzes network bursts by identifying synchronized 
 % bursting activity across multiple electrodes in the recording.
@@ -64,64 +64,45 @@ function get_network_burst_info(raster_raw, maxTime, samplingRate, networkPartic
             continue;
         end
         
-        % Initialize data structures. Each active electrode's spikes are kept as sorted
-        % unique sample indices instead of a dense electrodes x samples 0/1 matrix, so
-        % memory scales with the number of spikes rather than the recording length
-        numSamples = ceil(maxTime * samplingRate);
-        spikeSamples = {}; % Sample indices of each active electrode's spikes
+        % Initialize electrode counter and data structures
+        electrodeCount = 1;
+        spikeTrain = zeros(size(raster_raw, 1), ceil(maxTime * samplingRate)); % electrodes × time
         electrodeIndices = []; % Stores electrode indices
         activeElectrodeCount = 0;
         
         % Process each electrode 
+        validElectrodeIndices = [];
         for electrodeNum = 1:size(raster_raw, 1)
             % Skip empty electrodes
             if ~isempty(raster_raw{electrodeNum, 1, wellIndex})
                 % Count active electrodes
                 activeElectrodeCount = activeElectrodeCount + 1;
+                validElectrodeIndices = [validElectrodeIndices, electrodeNum];
                 
-                rawSpikeTimes = raster_raw{electrodeNum, 1, wellIndex};
-
-                % Remove invalid time points (<=0), as process_final_clusters.m does. Spike times
-                % are waveform cutout starts, so a spike detected in the first ~1 ms can sit at or
-                % before t = 0; only a manual edit that adds unsorted waveforms to a unit brings one here
-                isFiniteTime = isfinite(rawSpikeTimes);
-                isBeforeStart = isFiniteTime & rawSpikeTimes <= 0;
-                if any(isBeforeStart(:)) || ~all(isFiniteTime(:))
-                    electrodeId = raster_raw{electrodeNum, 2, wellIndex};
-                    if numel(electrodeId) >= 4
-                        electrodeName = sprintf('%c%d_%d%d', 'A' + electrodeId(1) - 1, electrodeId(2:4));
-                    else
-                        electrodeName = sprintf('well %d row %d', wellIndex, electrodeNum);
-                    end
-                    dropMessage = sprintf('Network burst: electrode %s: dropped %d spike time(s) at or before t = 0', ...
-                        electrodeName, sum(isBeforeStart(:)));
-                    if any(isBeforeStart(:))
-                        dropMessage = sprintf('%s (earliest %.4f ms)', dropMessage, ...
-                            1000 * min(rawSpikeTimes(isBeforeStart)));
-                    end
-                    dropMessage = sprintf('%s and %d non-finite time(s)\n', dropMessage, sum(~isFiniteTime(:)));
-                    fprintf('%s', dropMessage);
-                    appendToExportLog(outputFolder, dropMessage);
-                end
-
                 % Get spike times and convert to timepoints
-                spikeTimes = round(rawSpikeTimes(isFiniteTime & ~isBeforeStart) * samplingRate);
+                spikeTimes = round(raster_raw{electrodeNum, 1, wellIndex} * samplingRate);
                 spikeTimes(spikeTimes == 0) = 1;  % Ensure valid indices
-                spikeTimes(spikeTimes > numSamples) = []; % Remove out-of-bounds indices
+                spikeTimes(spikeTimes > size(spikeTrain, 2)) = []; % Remove out-of-bounds indices
                 
-                % Store spike timepoints; two units firing on the same sample count once
-                spikeSamples{end + 1, 1} = unique(spikeTimes(:));
+                % Create binary spike train
+                spikeTrain(electrodeCount, spikeTimes) = 1;
                 
                 % Track electrode indices - simplified version
-                electrodeIndices(end + 1, 1) = electrodeNum;
+                electrodeIndices(electrodeCount, :) = electrodeNum;
+                
+                electrodeCount = electrodeCount + 1;
             end
         end
         
+        % Trim unused rows from spikeTrain
+        spikeTrain = spikeTrain(1:electrodeCount-1, :);
+        electrodeIndices = electrodeIndices(1:electrodeCount-1, :);
+        
         % Only analyze if there are multiple electrodes
-        if numel(spikeSamples) > 1
+        if size(spikeTrain, 1) > 1
             % Detect network bursts
-            [networkBurstInfo, isBurstingElectrode] = get_network_spike_participation(samplingRate, ...
-                spikeSamples, electrodeIndices, networkParticipationThreshold, ...
+            networkBurstInfo = get_network_spike_participation_legacy(samplingRate, ...
+                spikeTrain, electrodeIndices, networkParticipationThreshold, ...
                 maxISINetwork, minSpikesNetwork);
             
             burst_info_all{wellIndex, 1} = networkBurstInfo;
@@ -132,7 +113,19 @@ function get_network_burst_info(raster_raw, maxTime, samplingRate, networkPartic
                 wellMetrics = zeros(19, 1);
             else
                 % Count electrodes that participate in bursts
-                burstingElectrodeCount = sum(isBurstingElectrode);
+                electrodesWithBursts = 0;
+                for e = 1:size(spikeTrain, 1)
+                    for b = 1:size(networkBurstInfo, 2)
+                        burstStart = networkBurstInfo(1, b);
+                        burstEnd = burstStart + (networkBurstInfo(3, b) * samplingRate);
+                        burstEnd = min(burstEnd, size(spikeTrain, 2));
+                        if any(spikeTrain(e, burstStart:burstEnd))
+                            electrodesWithBursts = electrodesWithBursts + 1;
+                            break; % This electrode has at least one burst
+                        end
+                    end
+                end
+                burstingElectrodeCount = electrodesWithBursts;
                 
                 % Basic network burst counts and rates
                 numNetworkBursts = size(networkBurstInfo, 2);
@@ -171,7 +164,7 @@ function get_network_burst_info(raster_raw, maxTime, samplingRate, networkPartic
                 end
                 
                 % Overall activity metrics (with division by zero check)
-                totalSpikes = sum(cellfun(@numel, spikeSamples));
+                totalSpikes = sum(spikeTrain, 'all');
                 if totalSpikes > 0
                     networkBurstPercentage = sum(networkBurstInfo(5, :)) / totalSpikes * 100;
                 else
@@ -203,12 +196,9 @@ function get_network_burst_info(raster_raw, maxTime, samplingRate, networkPartic
                 end
                 
                 % Calculate synchrony index with function check
-                [synchronyIndex, synchronyError] = calculate_multivariate_synchrony(spikeSamples, numSamples, samplingRate);
-                if isnan(synchronyIndex)
-                    appendToExportLog(outputFolder, sprintf(['Network burst: well %d: synchrony index ' ...
-                        'could not be calculated (%s) and is reported as NaN\n'], wellIndex, synchronyError));
-                end
+                synchronyIndex = calculate_multivariate_synchrony_legacy(spikeTrain');
 
+                
                 % Compile all metrics
                 wellMetrics = [
                     numNetworkBursts;
@@ -259,18 +249,4 @@ function get_network_burst_info(raster_raw, maxTime, samplingRate, networkPartic
     save([outputFolder, '\burst_info_all.mat'], 'burst_info_all', 'raster_raw', 'maxTime', 'sorting_results', '-v7.3');
     
     fprintf('Network burst analysis completed: %d wells processed\n', size(raster_raw, 3));
-end
-
-function appendToExportLog(outputFolder, message)
-% Record a message in export_log.txt in the output folder. The manual app writes its export
-% log there, and the file outlives the console
-    try
-        logId = fopen(fullfile(outputFolder, 'export_log.txt'), 'a');
-        if logId > 0
-            fprintf(logId, '%s', message);
-            fclose(logId);
-        end
-    catch
-        % Logging must never be the reason the analysis fails
-    end
 end
